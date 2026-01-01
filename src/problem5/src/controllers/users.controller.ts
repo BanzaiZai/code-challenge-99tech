@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { db } from "../database/database";
 import { users } from "../database/tables/index";
 import { BusinessError, ValidationError } from "../errors/index";
 import {
 	createUserSchema,
+	getUsersQuerySchema,
 	idParamSchema,
 	updateUserSchema,
 } from "../schemas/users.schema";
@@ -41,12 +42,55 @@ export async function createUser(
 }
 
 export async function getAllUsers(
-	_req: Request,
+	req: Request,
 	res: Response,
 	next: NextFunction,
 ): Promise<void> {
 	try {
-		const allUsers = await db.select().from(users);
+		const queryResult = getUsersQuerySchema.safeParse(req.query);
+
+		if (!queryResult.success) {
+			throw ValidationError.fromZod(queryResult.error);
+		}
+
+		const { limit, offset, sortBy, sortOrder, email, name, search } =
+			queryResult.data;
+
+		const conditions = [];
+
+		if (email) {
+			conditions.push(eq(users.email, email));
+		}
+
+		if (name) {
+			conditions.push(eq(users.name, name));
+		}
+
+		if (search) {
+			conditions.push(
+				or(ilike(users.name, `%${search}%`), ilike(users.email, `%${search}%`)),
+			);
+		}
+
+		const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+		const sortColumn = {
+			id: users.id,
+			name: users.name,
+			email: users.email,
+		}[sortBy];
+
+		const orderByClause =
+			sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
+
+		const allUsers = await db
+			.select()
+			.from(users)
+			.where(whereClause)
+			.orderBy(orderByClause)
+			.limit(limit)
+			.offset(offset);
+
 		res.json({ data: allUsers, count: allUsers.length });
 	} catch (error) {
 		next(error);
