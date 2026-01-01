@@ -1,13 +1,21 @@
-import dotenv from "dotenv";
+import "dotenv/config";
 import express from "express";
 import { Client } from "pg";
-
-dotenv.config();
+import {
+	createUser,
+	deleteUser,
+	getAllUsers,
+	getUserById,
+	updateUser,
+} from "../controllers/users.controller";
+import { pool } from "../database/database";
+import { errorHandler, notFoundHandler } from "../middleware/errorHandler";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env["PORT"] || 3000;
+let server: ReturnType<typeof app.listen>;
 
 async function checkDatabaseConnection(): Promise<boolean> {
 	const databaseUrl = process.env["DATABASE_URL"];
@@ -31,9 +39,14 @@ async function checkDatabaseConnection(): Promise<boolean> {
 	}
 }
 
-app.get("/health", (req, res) => {
-	res.json({ status: "ok" });
-});
+app.post("/users", createUser);
+app.get("/users", getAllUsers);
+app.get("/users/:id", getUserById);
+app.put("/users/:id", updateUser);
+app.delete("/users/:id", deleteUser);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 async function startServer() {
 	const dbActive = await checkDatabaseConnection();
@@ -42,9 +55,28 @@ async function startServer() {
 		console.warn("Starting server without database connection");
 	}
 
-	app.listen(PORT, () => {
+	server = app.listen(PORT, () => {
 		console.log(`Server running on port ${PORT}`);
 	});
 }
+
+async function shutdown(signal: string) {
+	console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+
+	server.close(async () => {
+		console.log("Server closed");
+		await pool.end();
+		console.log("Database pool closed");
+		process.exit(0);
+	});
+
+	setTimeout(() => {
+		console.error("Forced shutdown after timeout");
+		process.exit(1);
+	}, 10000);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 startServer();
